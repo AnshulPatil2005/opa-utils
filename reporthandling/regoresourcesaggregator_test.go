@@ -2,11 +2,13 @@ package reporthandling
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -57,6 +59,170 @@ func TestAggregateResourcesBySubjects2(t *testing.T) {
 
 	assert.Equal(t, 1, len(outputList))
 	assert.True(t, isObjectFields(outputList))
+}
+
+func rbacRoleRef(kind, name string) string {
+	return fmt.Sprintf(`{"apiGroup": "rbac.authorization.k8s.io", "kind": %q, "name": %q}`, kind, name)
+}
+
+// an empty namespace yields a cluster scoped object
+func rbacMetadata(name, namespace string) string {
+	if namespace == "" {
+		return fmt.Sprintf(`{"name": %q}`, name)
+	}
+	return fmt.Sprintf(`{"name": %q, "namespace": %q}`, name, namespace)
+}
+
+func rbacRole(kind, name, namespace string) string {
+	return fmt.Sprintf(`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": %q, "metadata": %s, "rules": [{"apiGroups": [""], "resources": ["pods"], "verbs": ["create"]}]}`,
+		kind, rbacMetadata(name, namespace))
+}
+
+// roleRef is spliced in verbatim so a case can omit or corrupt individual fields
+func rbacBinding(kind, name, namespace, roleRef string) string {
+	return fmt.Sprintf(`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": %q, "metadata": %s, "roleRef": %s, "subjects": [{"kind": "ServiceAccount", "name": "sa-a", "namespace": "ns-a"}]}`,
+		kind, rbacMetadata(name, namespace), roleRef)
+}
+
+func newRBACObject(t *testing.T, manifest string) workloadinterface.IMetadata {
+	t.Helper()
+	obj := make(map[string]interface{})
+	require.NoError(t, json.Unmarshal([]byte(manifest), &obj))
+	o := objectsenvelopes.NewObject(obj)
+	require.NotNil(t, o, "manifest did not map to a known object type: %s", manifest)
+	return o
+}
+
+// pins the RBAC resolution rules the aggregator must honour: matching roleRef on
+// kind and name alone paired a binding with a same named Role from an unrelated
+// namespace, and every rule using this aggregator reported that pair as a finding.
+func TestAggregateResourcesBySubjectsRoleRefResolution(t *testing.T) {
+	testCases := []struct {
+		objects []string
+		desc    string
+		// when set, the namespace of the Role expected in relatedObjects
+		expectedRoleNamespace string
+		expectedCount         int
+	}{
+		{
+			desc: "RoleBinding resolves a Role in its own namespace",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			desc: "RoleBinding does not resolve a same named Role from another namespace",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-b"),
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "with the name reused across namespaces only the local Role is aggregated",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacRole("Role", "shared-name", "ns-b"),
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			// a file scan cannot know the namespace, so resolving beats losing the finding
+			desc: "a Role with no namespace set still resolves",
+			objects: []string{
+				rbacRole("Role", "shared-name", ""),
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount: 1,
+		},
+		{
+			desc: "RoleBinding resolves a ClusterRole, which is not namespaced",
+			objects: []string{
+				rbacRole("ClusterRole", "shared-name", ""),
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("ClusterRole", "shared-name")),
+			},
+			expectedCount: 1,
+		},
+		{
+			desc: "ClusterRoleBinding resolves a ClusterRole",
+			objects: []string{
+				rbacRole("ClusterRole", "shared-name", ""),
+				rbacBinding("ClusterRoleBinding", "crb", "", rbacRoleRef("ClusterRole", "shared-name")),
+			},
+			expectedCount: 1,
+		},
+		{
+			desc: "ClusterRoleBinding does not resolve a namespaced Role",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("ClusterRoleBinding", "crb", "", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "roleRef pointing at another apiGroup does not resolve",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", `{"apiGroup": "example.com", "kind": "Role", "name": "shared-name"}`),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "roleRef without an apiGroup still resolves",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", `{"kind": "Role", "name": "shared-name"}`),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			desc: "a roleRef kind that is not a string is skipped, not fatal",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", `{"apiGroup": "rbac.authorization.k8s.io", "kind": 1, "name": "shared-name"}`),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "a subject that is not an object is skipped, not fatal",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "rb", "namespace": "ns-a"}, "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "shared-name"}, "subjects": ["not-an-object"]}`,
+			},
+			expectedCount: 0,
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.desc, func(t *testing.T) {
+			inputList := make([]workloadinterface.IMetadata, 0, len(tt.objects))
+			for _, manifest := range tt.objects {
+				inputList = append(inputList, newRBACObject(t, manifest))
+			}
+
+			outputList, err := AggregateResourcesBySubjects(inputList)
+			assert.NoError(t, err)
+			assert.Len(t, outputList, tt.expectedCount)
+
+			if tt.expectedRoleNamespace == "" || len(outputList) == 0 {
+				return
+			}
+
+			// relatedObjects is ordered [binding, role]
+			related, ok := outputList[0].GetObject()[objectsenvelopes.RelatedObjectsKey].([]map[string]interface{})
+			require.True(t, ok, "relatedObjects should be a list of objects")
+			require.Len(t, related, 2)
+			metadata, ok := related[1]["metadata"].(map[string]interface{})
+			require.True(t, ok, "the related role should carry metadata")
+			assert.Equal(t, tt.expectedRoleNamespace, metadata["namespace"], "the Role from the binding's own namespace should be aggregated")
+		})
+	}
 }
 
 func isObjectFields(objs []workloadinterface.IMetadata) bool {
