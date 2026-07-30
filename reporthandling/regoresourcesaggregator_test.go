@@ -78,6 +78,21 @@ func rbacRole(kind, name, namespace string) string {
 		kind, rbacMetadata(name, namespace))
 }
 
+// a role like CRD kind, outside rbac.authorization.k8s.io
+func crdRole(kind, name, namespace string) string {
+	return fmt.Sprintf(`{"apiVersion": "example.com/v1", "kind": %q, "metadata": %s, "rules": []}`,
+		kind, rbacMetadata(name, namespace))
+}
+
+func crdRoleRef(kind, name string) string {
+	return fmt.Sprintf(`{"apiGroup": "example.com", "kind": %q, "name": %q}`, kind, name)
+}
+
+func crdBinding(kind, name, namespace, roleRef string) string {
+	return fmt.Sprintf(`{"apiVersion": "example.com/v1", "kind": %q, "metadata": %s, "roleRef": %s, "subjects": [{"kind": "ServiceAccount", "name": "sa-a", "namespace": "ns-a"}]}`,
+		kind, rbacMetadata(name, namespace), roleRef)
+}
+
 // roleRef is spliced in verbatim so a case can omit or corrupt individual fields
 func rbacBinding(kind, name, namespace, roleRef string) string {
 	return fmt.Sprintf(`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": %q, "metadata": %s, "roleRef": %s, "subjects": [{"kind": "ServiceAccount", "name": "sa-a", "namespace": "ns-a"}]}`,
@@ -93,9 +108,8 @@ func newRBACObject(t *testing.T, manifest string) workloadinterface.IMetadata {
 	return o
 }
 
-// pins the RBAC resolution rules the aggregator must honour: matching roleRef on
-// kind and name alone paired a binding with a same named Role from an unrelated
-// namespace, and every rule using this aggregator reported that pair as a finding.
+// pins the RBAC resolution rules: kind and name alone paired a binding with a same
+// named Role from an unrelated namespace, and every rule using it reported that pair.
 func TestAggregateResourcesBySubjectsRoleRefResolution(t *testing.T) {
 	testCases := []struct {
 		objects []string
@@ -157,10 +171,65 @@ func TestAggregateResourcesBySubjectsRoleRefResolution(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
+			// a binding leaves its namespace to the apply context as often as a role does
+			desc: "a binding with no namespace set still resolves a Role in any namespace",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-b"),
+				rbacBinding("RoleBinding", "rb", "", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-b",
+		},
+		{
 			desc: "ClusterRoleBinding does not resolve a namespaced Role",
 			objects: []string{
 				rbacRole("Role", "shared-name", "ns-a"),
 				rbacBinding("ClusterRoleBinding", "crb", "", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "RoleBinding resolves a CRD role in its own namespace",
+			objects: []string{
+				crdRole("ProjectRole", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", crdRoleRef("ProjectRole", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			// the kind does not say whether a CRD is namespaced, so its namespace decides
+			desc: "ClusterRoleBinding does not resolve a namespaced CRD role",
+			objects: []string{
+				crdRole("ProjectRole", "shared-name", "ns-a"),
+				rbacBinding("ClusterRoleBinding", "crb", "", crdRoleRef("ProjectRole", "shared-name")),
+			},
+			expectedCount: 0,
+		},
+		{
+			desc: "ClusterRoleBinding resolves a CRD role with no namespace",
+			objects: []string{
+				crdRole("ProjectRole", "shared-name", ""),
+				rbacBinding("ClusterRoleBinding", "crb", "", crdRoleRef("ProjectRole", "shared-name")),
+			},
+			expectedCount: 1,
+		},
+		{
+			// only a ClusterRoleBinding is known not to reach into a namespace, so a CRD
+			// binding kind keeps resolving its own CRD role
+			desc: "a CRD binding resolves a CRD role in its own namespace",
+			objects: []string{
+				crdRole("ProjectRole", "shared-name", "ns-a"),
+				crdBinding("ProjectRoleBinding", "prb", "ns-a", crdRoleRef("ProjectRole", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			desc: "a CRD binding does not resolve a CRD role in another namespace",
+			objects: []string{
+				crdRole("ProjectRole", "shared-name", "ns-b"),
+				crdBinding("ProjectRoleBinding", "prb", "ns-a", crdRoleRef("ProjectRole", "shared-name")),
 			},
 			expectedCount: 0,
 		},
@@ -188,6 +257,42 @@ func TestAggregateResourcesBySubjectsRoleRefResolution(t *testing.T) {
 				rbacBinding("RoleBinding", "rb", "ns-a", `{"apiGroup": "rbac.authorization.k8s.io", "kind": 1, "name": "shared-name"}`),
 			},
 			expectedCount: 0,
+		},
+		{
+			// a corrupt qualifier reads as unset, never as a way to hide a subject
+			desc: "a roleRef apiGroup that is not a string is read as unset, not fatal",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				rbacBinding("RoleBinding", "rb", "ns-a", `{"apiGroup": 5, "kind": "Role", "name": "shared-name"}`),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			desc: "a role apiVersion that is not a string is read as unset, not fatal",
+			objects: []string{
+				`{"apiVersion": 1, "kind": "Role", "metadata": {"name": "shared-name", "namespace": "ns-a"}, "rules": []}`,
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
+		},
+		{
+			desc: "a role namespace that is not a string is read as unset, not fatal",
+			objects: []string{
+				`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "shared-name", "namespace": 7}, "rules": []}`,
+				rbacBinding("RoleBinding", "rb", "ns-a", rbacRoleRef("Role", "shared-name")),
+			},
+			expectedCount: 1,
+		},
+		{
+			desc: "a binding namespace that is not a string is read as unset, not fatal",
+			objects: []string{
+				rbacRole("Role", "shared-name", "ns-a"),
+				`{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "rb", "namespace": 7}, "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "shared-name"}, "subjects": [{"kind": "ServiceAccount", "name": "sa-a", "namespace": "ns-a"}]}`,
+			},
+			expectedCount:         1,
+			expectedRoleNamespace: "ns-a",
 		},
 		{
 			desc: "a subject that is not an object is skipped, not fatal",

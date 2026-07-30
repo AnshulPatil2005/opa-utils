@@ -29,9 +29,10 @@ func RegoResourcesAggregator(rule *PolicyRule, k8sObjects []workloadinterface.IM
 	return k8sObjects, nil
 }
 
-// roleRefString returns roleRef.<field> as a string, false if missing or not a string.
-func roleRefString(bindingObj map[string]interface{}, field string) (string, bool) {
-	v, ok := workloadinterface.InspectMap(bindingObj, "roleRef", field)
+// objectString returns the string at path within obj, false if missing or not a string.
+// GetNamespace and GetApiVersion assert v.(string) without comma-ok, so they panic here.
+func objectString(obj map[string]interface{}, path ...string) (string, bool) {
+	v, ok := workloadinterface.InspectMap(obj, path...)
 	if !ok {
 		return "", false
 	}
@@ -39,44 +40,69 @@ func roleRefString(bindingObj map[string]interface{}, field string) (string, boo
 	return s, ok
 }
 
-// namespacesCompatible - an unset namespace means "whatever this is applied into",
-// which a file scan cannot know, so it matches anything. Cluster reads always set it.
+// namespacesCompatible - unset matches anything, on the binding side too: a namespace
+// less RoleBinding manifest still pairs with a Role anywhere, which beats losing every
+// finding written that way. Cluster reads, where the bug bites, always set it.
 func namespacesCompatible(roleNamespace, bindingNamespace string) bool {
 	return roleNamespace == "" || bindingNamespace == "" || roleNamespace == bindingNamespace
 }
 
-// bindingReferencesRole reports whether the roleRef of bindingWorkload resolves to
-// roleWorkload. Kind and name alone pair a binding with a same named Role from an
-// unrelated namespace, which the subject has no access to at all.
-func bindingReferencesRole(bindingWorkload, roleWorkload workloadinterface.IMetadata) bool {
-	bindingObj := bindingWorkload.GetObject()
+// roleIsNamespaced - by definition for Role and ClusterRole, by its namespace for a CRD.
+func roleIsNamespaced(roleKind, roleNamespace string) bool {
+	switch roleKind {
+	case "Role":
+		return true
+	case "ClusterRole":
+		return false
+	default:
+		return roleNamespace != ""
+	}
+}
 
-	name, ok := roleRefString(bindingObj, "name")
+// bindingResolvesNamespacedRole - a Role is bindable only by a RoleBinding, a CRD role by
+// any binding kind except a ClusterRoleBinding, which never reaches into a namespace.
+func bindingResolvesNamespacedRole(roleKind, bindingKind string) bool {
+	if roleKind == "Role" {
+		return bindingKind == "RoleBinding"
+	}
+	return bindingKind != "ClusterRoleBinding"
+}
+
+// bindingReferencesRole reports whether bindingWorkload's roleRef resolves to roleWorkload.
+// Kind and name alone pair it with a same named Role from an unrelated namespace.
+func bindingReferencesRole(bindingWorkload, roleWorkload workloadinterface.IMetadata) bool {
+	bindingObj, roleObj := bindingWorkload.GetObject(), roleWorkload.GetObject()
+
+	name, ok := objectString(bindingObj, "roleRef", "name")
 	if !ok || name != roleWorkload.GetName() {
 		return false
 	}
 
-	kind, ok := roleRefString(bindingObj, "kind")
-	if !ok || kind != roleWorkload.GetKind() {
+	kind, ok := objectString(bindingObj, "roleRef", "kind")
+	roleKind, roleKindOK := objectString(roleObj, "kind")
+	if !ok || !roleKindOK || kind != roleKind {
 		return false
 	}
 
-	// apiGroup is often omitted in hand written manifests
-	apiGroup, _ := roleRefString(bindingObj, "apiGroup")
-	roleGroup, _ := k8sinterface.SplitApiVersion(roleWorkload.GetApiVersion())
+	// apiGroup and the namespaces below are qualifiers: missing or corrupt reads as unset,
+	// so garbage in one cannot hide a subject from these rules
+	apiGroup, _ := objectString(bindingObj, "roleRef", "apiGroup")
+	apiVersion, _ := objectString(roleObj, "apiVersion")
+	roleGroup, _ := k8sinterface.SplitApiVersion(apiVersion)
 	if apiGroup != "" && roleGroup != "" && apiGroup != roleGroup {
 		return false
 	}
 
-	switch kind {
-	case "ClusterRole": // cluster scoped, either binding kind may reference it
-		return true
-	case "Role": // namespaced, only a RoleBinding alongside it resolves
-		return bindingWorkload.GetKind() == "RoleBinding" &&
-			namespacesCompatible(roleWorkload.GetNamespace(), bindingWorkload.GetNamespace())
-	default: // a CRD kind: keep pairing, but not across two namespaces that differ
-		return namespacesCompatible(roleWorkload.GetNamespace(), bindingWorkload.GetNamespace())
+	roleNamespace, _ := objectString(roleObj, "metadata", "namespace")
+	if !roleIsNamespaced(roleKind, roleNamespace) {
+		return true // cluster scoped, either binding kind may reference it
 	}
+
+	// namespaced, only a binding alongside it resolves
+	bindingKind, _ := objectString(bindingObj, "kind")
+	bindingNamespace, _ := objectString(bindingObj, "metadata", "namespace")
+	return bindingResolvesNamespacedRole(roleKind, bindingKind) &&
+		namespacesCompatible(roleNamespace, bindingNamespace)
 }
 
 func AggregateResourcesBySubjects(k8sObjects []workloadinterface.IMetadata) ([]workloadinterface.IMetadata, error) {
