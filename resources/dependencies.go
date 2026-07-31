@@ -2,8 +2,9 @@ package resources
 
 var RegoCAUtils = `
 package cautils
+import rego.v1
 
-list_contains(lista,element) {
+list_contains(lista,element) if {
   some i
   lista[i] == element
 }
@@ -11,13 +12,13 @@ list_contains(lista,element) {
 # getPodName(metadata) = name {
 # 	name := metadata.generateName
 #}
-getPodName(metadata) = name {
+getPodName(metadata) = name if {
     name := metadata.name
 }
 
 #returns subobject ,sub1 is partial to parent,  e.g parent = {a:a,b:b,c:c,d:d}
 # sub1 = {b:b,c:c} - result is {b:b,c:c}, if sub1={b:b,e:f} returns {b:b}
-object_intersection(parent,sub1) = r{
+object_intersection(parent,sub1) = r if {
 
   r := {k:p  | p := sub1[k]
               parent[k]== p
@@ -25,12 +26,12 @@ object_intersection(parent,sub1) = r{
 }
 
 #returns if parent contains sub(both are objects not sets!!)
-is_subobject(sub,parent) {
+is_subobject(sub,parent) if {
 object_intersection(sub,parent)  == sub
 }
 
 # parse unix permissions
-unix_permission(perm) = ret {
+unix_permission(perm) = ret if {
     ret := {
         "user": unix_permission_from_octal(bits.rsh(perm, 6)), 
         "group": unix_permission_from_octal(bits.rsh(perm, 3)),
@@ -42,7 +43,7 @@ unix_permission(perm) = ret {
 }
 
 # parse single unix permission (one octal digit)
-unix_permission_from_octal(perm) = ret {
+unix_permission_from_octal(perm) = ret if {
     ret := {
         "exec": bits.and(perm, 1) != 0,
         "write": bits.and(perm, 2) != 0,
@@ -51,13 +52,13 @@ unix_permission_from_octal(perm) = ret {
 }
 
 # check that the given permissions are more permissive than 644
-is_not_strict_conf_permission(p){
+is_not_strict_conf_permission(p) if {
     not is_strict_conf_permission(p)
 }
 
 # check that the given permissions are 644 or above
 # deprecated. use 'unix_permissions_allow' instead
-is_strict_conf_permission(p){
+is_strict_conf_permission(p) if {
     perm := unix_permission(p)
     not perm.user.exec
     not perm.group.write
@@ -70,7 +71,7 @@ is_strict_conf_permission(p){
 }
 
 # check if (unix permission integers) 'actual' permissions allowed by 'allow'
-unix_permissions_allow(allow, actual) {
+unix_permissions_allow(allow, actual) if {
     allow_parsed := unix_permission(allow)
     actual_parsed := unix_permission(actual)
     
@@ -91,25 +92,25 @@ unix_permissions_allow(allow, actual) {
 # true, false => true
 # false, false => ture
 # false, true => false
-_unix_perm_allow(allow, actual) {
+_unix_perm_allow(allow, actual) if {
     allow == true
 }
-_unix_perm_allow(allow, actual) {
+_unix_perm_allow(allow, actual) if {
     allow == actual
 }
 
 # Check if file ownership is different than root:root
-is_not_strict_conf_ownership(ownership){
+is_not_strict_conf_ownership(ownership) if {
     not is_strict_conf_ownership(ownership)
 }
 
 # File ownership check only if there is no error
-is_strict_conf_ownership(ownership){
+is_strict_conf_ownership(ownership) if {
     ownership.err
 }
 
 # Ensure file ownership are root:root
-is_strict_conf_ownership(ownership){
+is_strict_conf_ownership(ownership) if {
     ownership.uid == 0
     ownership.gid == 0
 }
@@ -117,6 +118,7 @@ is_strict_conf_ownership(ownership){
 
 var RegoDesignators = `
 package designators
+import rego.v1
 
 import data.cautils
 #functions that related to designators
@@ -125,7 +127,7 @@ import data.cautils
 #@input@: receive as part of the input object "included_namespaces" list
 #@input@: item's namespace as "namespace"
 #returns true if namespace exists in that list
-included_namespaces(namespace){
+included_namespaces(namespace) if {
     cautils.list_contains(["default"],namespace)
 }
 
@@ -133,15 +135,15 @@ included_namespaces(namespace){
 #@input@: receive as part of the input object "forbidden_namespaces" list
 #@input@: item's namespace as "namespace"
 #returns true if namespace exists in that list
-excluded_namespaces(namespace){
+excluded_namespaces(namespace) if {
     not cautils.list_contains(["excluded"],namespace)
 }
 
-forbidden_wlids(wlid){
+forbidden_wlids(wlid) if {
     input.forbidden_wlids[_] == wlid
 }
 
-filter_k8s_object(obj) = filtered {
+filter_k8s_object(obj) = filtered if {
     #put 
     filtered := obj
     	#filtered := [ x | cautils.list_contains(["default"],obj[i].metadata.namespace) ; x := obj[i] ]
@@ -151,6 +153,7 @@ filter_k8s_object(obj) = filtered {
 `
 var RegoKubernetesApiClient = `
 package kubernetes.api.client
+import rego.v1
 
 # service account token
 token :=  data.k8sconfig.token
@@ -293,7 +296,7 @@ query_all_no_auth(resource) = http.send({
 }) 
 
 
-field_transform_to_qry_param(field,map) = finala {
+field_transform_to_qry_param(field,map) = finala if {
 	mid := {concat(".",[field,key]): val | val := map[key]}
     finala := label_map_to_query_string(mid)
 }
