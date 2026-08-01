@@ -1,7 +1,6 @@
 package score
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -17,7 +16,6 @@ import (
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/shared"
 	"go.uber.org/zap"
-	appsv1 "k8s.io/api/apps/v1"
 )
 
 const (
@@ -171,24 +169,17 @@ func (su *ScoreUtil) processWorkload(wl *workloadinterface.Workload, score float
 		return score
 	}
 
-	/* TODO - replace marshal and unmarshal by map inspection, like so:
 	if n, ok := workloadinterface.InspectMap(v, "status", "desiredNumberScheduled"); ok {
-		if desiredNumberScheduled, ok := n.(int32); ok && desiredNumberScheduled > 0 {
-			score *= float32(desiredNumberScheduled)
+		switch val := n.(type) {
+		case int32:
+			if val > 0 {
+				score *= float32(val)
+			}
+		case float64:
+			if val > 0 {
+				score *= float32(val)
+			}
 		}
-	}
-	*/
-	b, err := json.Marshal(v)
-	if err != nil {
-		return score
-	}
-
-	// special rule for DaemonSets
-	dmnset := appsv1.DaemonSet{}
-	_ = json.Unmarshal(b, &dmnset)
-
-	if dmnset.Status.DesiredNumberScheduled > 0 {
-		score *= float32(dmnset.Status.DesiredNumberScheduled)
 	}
 
 	return score
