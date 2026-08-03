@@ -52,7 +52,7 @@ func WithReplicas(replicas int) Option {
 }
 
 // WithDesiredNumberScheduled overrides the desired number scheduled in the status section, if any.
-func WithDesiredNumberScheduled(desired int32) Option {
+func WithDesiredNumberScheduled(desired interface{}) Option {
 	return func(workload map[string]interface{}) {
 		tmp, ok := workload["status"].(map[string]interface{})
 		if !ok {

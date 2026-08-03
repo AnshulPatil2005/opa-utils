@@ -170,15 +170,23 @@ func (su *ScoreUtil) processWorkload(wl *workloadinterface.Workload, score float
 	}
 
 	if n, ok := workloadinterface.InspectMap(v, "status", "desiredNumberScheduled"); ok {
+		var desired float32
 		switch val := n.(type) {
+		case int:
+			desired = float32(val)
+		case int16:
+			desired = float32(val)
 		case int32:
-			if val > 0 {
-				score *= float32(val)
-			}
+			desired = float32(val)
+		case int64:
+			desired = float32(val)
+		case float32:
+			desired = val
 		case float64:
-			if val > 0 {
-				score *= float32(val)
-			}
+			desired = float32(val)
+		}
+		if desired > 0 {
+			score *= desired
 		}
 	}
 
