@@ -105,7 +105,21 @@ func TestGetScore(t *testing.T) {
 		t.Run("a non-zero desiredNumberScheduled should multiply the score", func(t *testing.T) {
 			t.Parallel()
 
-			ds := mocks.GetResourceByType(t, "daemonset", mocks.WithDesiredNumberScheduled(10))
+			ds := mocks.GetResourceByType(t, "daemonset", mocks.WithDesiredNumberScheduled(int32(10)))
+
+			var s ScoreUtil
+			score := s.GetScore(ds)
+
+			const expected = float32(10)
+			require.InDeltaf(t, expected, score, 1e-6,
+				"invalid score: should be %v~(numerical errrors considered), but got: %v", expected, score,
+			)
+		})
+
+		t.Run("an int64 desiredNumberScheduled should multiply the score (unstructured k8s objects)", func(t *testing.T) {
+			t.Parallel()
+
+			ds := mocks.GetResourceByType(t, "daemonset", mocks.WithDesiredNumberScheduled(int64(10)))
 
 			var s ScoreUtil
 			score := s.GetScore(ds)
