@@ -84,6 +84,7 @@ func (control *ResourceAssociatedControl) SetStatus(c reporthandling.Control) {
 	if actionRequiredStr == "" {
 		control.Status.InnerStatus = status
 		control.Status.SubStatus = subStatus
+		control.Status.InnerInfo = apis.SubStatusInfo(subStatus)
 		return
 	}
 
@@ -92,14 +93,12 @@ func (control *ResourceAssociatedControl) SetStatus(c reporthandling.Control) {
 	if status == apis.StatusFailed && actionRequired == apis.SubStatusRequiresReview {
 		status = apis.StatusSkipped
 		subStatus = apis.SubStatusRequiresReview
-		statusInfo = string(apis.SubStatusRequiresReviewInfo)
 	}
 
 	// If the control type is manual review, the status is skipped and the sub status is manual review
 	if status == apis.StatusFailed && actionRequired == apis.SubStatusManualReview {
 		status = apis.StatusSkipped
 		subStatus = apis.SubStatusManualReview
-		statusInfo = string(apis.SubStatusManualReviewInfo)
 	}
 
 	// If the control type is configuration and the configuration is not set, the status is skipped and the sub status is configuration.
@@ -107,8 +106,8 @@ func (control *ResourceAssociatedControl) SetStatus(c reporthandling.Control) {
 	if actionRequired == apis.SubStatusConfiguration && controlMissingAllConfigurations(control) && subStatus != apis.SubStatusNotEvaluated {
 		status = apis.StatusSkipped
 		subStatus = apis.SubStatusConfiguration
-		statusInfo = string(apis.SubStatusConfigurationInfo)
 	}
+	statusInfo = apis.SubStatusInfo(subStatus)
 
 	control.Status.InnerStatus = status
 	control.Status.InnerInfo = statusInfo
