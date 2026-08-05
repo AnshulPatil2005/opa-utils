@@ -76,3 +76,45 @@ func TestConvertStatusToNewStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestSubStatusInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		subStatus ScanningSubStatus
+		want      string
+	}{
+		{
+			name:      "configuration",
+			subStatus: SubStatusConfiguration,
+			want:      string(SubStatusConfigurationInfo),
+		},
+		{
+			name:      "requires review",
+			subStatus: SubStatusRequiresReview,
+			want:      string(SubStatusRequiresReviewInfo),
+		},
+		{
+			name:      "manual review",
+			subStatus: SubStatusManualReview,
+			want:      string(SubStatusManualReviewInfo),
+		},
+		{
+			name:      "not evaluated",
+			subStatus: SubStatusNotEvaluated,
+			want:      string(SubStatusNotEvaluatedInfo),
+		},
+		{
+			name:      "unknown",
+			subStatus: SubStatusUnknown,
+			want:      "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SubStatusInfo(test.subStatus); got != test.want {
+				t.Errorf("SubStatusInfo() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

@@ -73,8 +73,50 @@ func TestSetStatus(t *testing.T) {
 	r7.SetStatus(*mockControlWithActionRequiredConfiguration())
 	assert.Equal(t, apis.StatusSkipped, r7.GetStatus(nil).Status())
 	assert.Equal(t, apis.SubStatusNotEvaluated, r7.GetSubStatus())
+	assert.Equal(t, string(apis.SubStatusNotEvaluatedInfo), r7.GetStatus(nil).Info())
 	assert.True(t, r7.GetStatus(nil).IsSkipped())
 
+}
+
+func TestSetStatusAddsSubStatusInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		control *ResourceAssociatedControl
+		source  reporthandling.Control
+		want    string
+	}{
+		{
+			name:    "not evaluated rule",
+			control: mockResourceAssociatedControlNotEvaluated(),
+			source:  reporthandling.Control{},
+			want:    string(apis.SubStatusNotEvaluatedInfo),
+		},
+		{
+			name:    "configuration action",
+			control: mockResourceAssociatedControlConfiguration(),
+			source:  *mockControlWithActionRequiredConfiguration(),
+			want:    string(apis.SubStatusConfigurationInfo),
+		},
+		{
+			name:    "manual review action",
+			control: mockResourceAssociatedControlFailed(),
+			source:  *mockControlWithActionRequiredManualReview(),
+			want:    string(apis.SubStatusManualReviewInfo),
+		},
+		{
+			name:    "requires review action",
+			control: mockResourceAssociatedControlFailed(),
+			source:  *mockControlWithActionRequiredRequiresReview(),
+			want:    string(apis.SubStatusRequiresReviewInfo),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.control.SetStatus(test.source)
+			assert.Equal(t, test.want, test.control.GetStatus(nil).Info())
+		})
+	}
 }
 
 func TestResourceAssociatedControl_SetName(t *testing.T) {

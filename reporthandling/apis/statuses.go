@@ -29,6 +29,22 @@ const (
 	SubStatusNotEvaluatedInfo   StatusMsg = "Control was not evaluated because required resource types could not be collected"
 )
 
+// SubStatusInfo returns the user-facing explanation for a known sub status.
+func SubStatusInfo(subStatus ScanningSubStatus) string {
+	switch subStatus {
+	case SubStatusConfiguration:
+		return string(SubStatusConfigurationInfo)
+	case SubStatusRequiresReview:
+		return string(SubStatusRequiresReviewInfo)
+	case SubStatusManualReview:
+		return string(SubStatusManualReviewInfo)
+	case SubStatusNotEvaluated:
+		return string(SubStatusNotEvaluatedInfo)
+	default:
+		return ""
+	}
+}
+
 // IStatus interface handling status
 type IStatus interface {
 	Status() ScanningStatus

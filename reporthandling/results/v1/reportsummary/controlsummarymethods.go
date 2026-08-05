@@ -65,16 +65,16 @@ func (controlSummary *ControlSummary) calculateNSetSubStatus(subStatus apis.Scan
 	case apis.StatusSkipped:
 		if subStatus == apis.SubStatusNotEvaluated || controlSummary.StatusInfo.SubStatus == apis.SubStatusNotEvaluated {
 			controlSummary.StatusInfo.SubStatus = apis.SubStatusNotEvaluated
-			controlSummary.StatusInfo.InnerInfo = string(apis.SubStatusNotEvaluatedInfo)
+			controlSummary.StatusInfo.InnerInfo = apis.SubStatusInfo(apis.SubStatusNotEvaluated)
 		} else if subStatus == apis.SubStatusConfiguration || controlSummary.StatusInfo.SubStatus == apis.SubStatusConfiguration {
 			controlSummary.StatusInfo.SubStatus = apis.SubStatusConfiguration
-			controlSummary.StatusInfo.InnerInfo = string(apis.SubStatusConfigurationInfo)
+			controlSummary.StatusInfo.InnerInfo = apis.SubStatusInfo(apis.SubStatusConfiguration)
 		} else if subStatus == apis.SubStatusManualReview || controlSummary.StatusInfo.SubStatus == apis.SubStatusManualReview {
 			controlSummary.StatusInfo.SubStatus = apis.SubStatusManualReview
-			controlSummary.StatusInfo.InnerInfo = string(apis.SubStatusManualReviewInfo)
+			controlSummary.StatusInfo.InnerInfo = apis.SubStatusInfo(apis.SubStatusManualReview)
 		} else if subStatus == apis.SubStatusRequiresReview || controlSummary.StatusInfo.SubStatus == apis.SubStatusRequiresReview {
 			controlSummary.StatusInfo.SubStatus = apis.SubStatusRequiresReview
-			controlSummary.StatusInfo.InnerInfo = string(apis.SubStatusRequiresReviewInfo)
+			controlSummary.StatusInfo.InnerInfo = apis.SubStatusInfo(apis.SubStatusRequiresReview)
 		}
 	case apis.StatusFailed:
 		controlSummary.StatusInfo.SubStatus = apis.SubStatusUnknown
