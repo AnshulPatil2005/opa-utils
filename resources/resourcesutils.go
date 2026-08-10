@@ -125,7 +125,9 @@ func LoadRegoFiles(dir string) map[string]string {
 			if err != nil {
 				fmt.Printf("LoadRegoFiles, Failed to load: %s: %v", path, err)
 			} else {
-				modules[strings.Trim(filepath.Base(path), ".rego")] = string(content)
+				// TrimSuffix, not Trim: Trim takes a cutset, so ".rego" would strip any
+				// leading or trailing '.', 'r', 'e', 'g' or 'o' from the base name.
+				modules[strings.TrimSuffix(filepath.Base(path), ".rego")] = string(content)
 			}
 		}
 		return nil
