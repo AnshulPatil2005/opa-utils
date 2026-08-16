@@ -48,4 +48,3 @@ func TestIsTypeTypeHostSensor(t *testing.T) {
 		})
 	}
 }
-

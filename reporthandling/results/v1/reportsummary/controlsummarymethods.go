@@ -61,6 +61,9 @@ func (controlSummary *ControlSummary) calculateNSetSubStatus(subStatus apis.Scan
 		} else if subStatus == apis.SubStatusException || controlSummary.StatusInfo.SubStatus == apis.SubStatusException {
 			controlSummary.StatusInfo.SubStatus = apis.SubStatusException
 			controlSummary.StatusInfo.InnerInfo = ""
+		} else if subStatus == apis.SubStatusIncompleteCoverage || controlSummary.StatusInfo.SubStatus == apis.SubStatusIncompleteCoverage {
+			controlSummary.StatusInfo.SubStatus = apis.SubStatusIncompleteCoverage
+			controlSummary.StatusInfo.InnerInfo = ""
 		}
 	case apis.StatusSkipped:
 		if subStatus == apis.SubStatusNotEvaluated || controlSummary.StatusInfo.SubStatus == apis.SubStatusNotEvaluated {
