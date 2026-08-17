@@ -288,6 +288,37 @@ func TestGetScore(t *testing.T) {
 	})
 }
 
+// Regression test: NewScore used to memoize its result behind a sync.Once,
+// so every call after the very first one in the process silently ignored its
+// allResources argument and returned the *ScoreUtil built from whichever
+// resources were passed on that first call. This asserts NewScore returns an
+// independent ScoreUtil, bound to its own resources, on every call.
+func TestNewScore_ReturnsIndependentInstancesPerCall(t *testing.T) {
+	t.Parallel()
+
+	resourcesA := map[string]workloadinterface.IMetadata{
+		"resource-a": reporthandling.NewResource(mocks.GetResourceByType(t, "Pod", mocks.WithName("resource-a"))),
+	}
+	resourcesB := map[string]workloadinterface.IMetadata{
+		"resource-b": reporthandling.NewResource(mocks.GetResourceByType(t, "Pod", mocks.WithName("resource-b"))),
+	}
+
+	scoreA := NewScore(resourcesA)
+	scoreB := NewScore(resourcesB)
+
+	assert.NotSame(t, scoreA, scoreB, "NewScore must not return a shared singleton across calls")
+
+	_, aHasOwn := scoreA.resources["resource-a"]
+	_, aHasOther := scoreA.resources["resource-b"]
+	assert.True(t, aHasOwn, "the first ScoreUtil must retain the resources passed to its own NewScore call")
+	assert.False(t, aHasOther, "the first ScoreUtil must not see resources passed to a later NewScore call")
+
+	_, bHasOwn := scoreB.resources["resource-b"]
+	_, bHasOther := scoreB.resources["resource-a"]
+	assert.True(t, bHasOwn, "the second ScoreUtil must retain the resources passed to its own NewScore call")
+	assert.False(t, bHasOther, "the second ScoreUtil must not see resources passed to an earlier NewScore call")
+}
+
 func TestCalculatePostureReportV2(t *testing.T) {
 	t.Parallel()
 
