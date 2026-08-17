@@ -5,18 +5,19 @@ type ScanningSubStatus string
 type StatusMsg string
 
 const (
-	StatusPassed            ScanningStatus    = "passed"
-	StatusFailed            ScanningStatus    = "failed"
-	StatusSkipped           ScanningStatus    = "skipped"
-	SubStatusException      ScanningSubStatus = "w/exceptions"
-	SubStatusIrrelevant     ScanningSubStatus = "irrelevant"
-	SubStatusConfiguration  ScanningSubStatus = "configuration"
-	SubStatusIntegration    ScanningSubStatus = "integration"
-	SubStatusRequiresReview ScanningSubStatus = "requires review"
-	SubStatusManualReview   ScanningSubStatus = "manual review"
-	SubStatusNotEvaluated   ScanningSubStatus = "notEvaluated"
-	SubStatusUnknown        ScanningSubStatus = "" // keep this empty
-	StatusUnknown           ScanningStatus    = "" // keep this empty
+	StatusPassed                ScanningStatus    = "passed"
+	StatusFailed                ScanningStatus    = "failed"
+	StatusSkipped               ScanningStatus    = "skipped"
+	SubStatusException          ScanningSubStatus = "w/exceptions"
+	SubStatusIrrelevant         ScanningSubStatus = "irrelevant"
+	SubStatusConfiguration      ScanningSubStatus = "configuration"
+	SubStatusIntegration        ScanningSubStatus = "integration"
+	SubStatusRequiresReview     ScanningSubStatus = "requires review"
+	SubStatusManualReview       ScanningSubStatus = "manual review"
+	SubStatusNotEvaluated       ScanningSubStatus = "notEvaluated"
+	SubStatusIncompleteCoverage ScanningSubStatus = "incompleteCoverage"
+	SubStatusUnknown            ScanningSubStatus = "" // keep this empty
+	StatusUnknown               ScanningStatus    = "" // keep this empty
 
 	StatusExcluded   ScanningStatus = "excluded"   // Deprecated
 	StatusIrrelevant ScanningStatus = "irrelevant" // Deprecated
@@ -106,6 +107,9 @@ func CompareStatusAndSubStatus(a, b ScanningStatus, aSub, bSub ScanningSubStatus
 	case StatusPassed:
 		if aSub == SubStatusException || bSub == SubStatusException {
 			return status, SubStatusException
+		}
+		if aSub == SubStatusIncompleteCoverage || bSub == SubStatusIncompleteCoverage {
+			return status, SubStatusIncompleteCoverage
 		}
 		if aSub == SubStatusIrrelevant || bSub == SubStatusIrrelevant {
 			return status, SubStatusIrrelevant

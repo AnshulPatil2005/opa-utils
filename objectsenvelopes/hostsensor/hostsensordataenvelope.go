@@ -153,4 +153,3 @@ func IsTypeTypeHostSensor(object map[string]interface{}) bool {
 	}
 	return false
 }
-
