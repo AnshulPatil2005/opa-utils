@@ -62,8 +62,6 @@ func (control *ResourceAssociatedControl) setExceptions(workload workloadinterfa
 	for i := range control.ResourceAssociatedRules {
 		exceptionsPolicies = processor.ListRuleExceptions(exceptionsPolicies, "", control.GetID(), "")
 		control.ResourceAssociatedRules[i].setExceptions(workload, exceptionsPolicies, clusterName, processor)
-		// Update rule status according to exceptions
-		control.ResourceAssociatedRules[i].SetStatus(control.ResourceAssociatedRules[i].GetStatus(nil).Status(), nil)
 	}
 	// Update control status according to rules status
 	control.SetStatus(c)

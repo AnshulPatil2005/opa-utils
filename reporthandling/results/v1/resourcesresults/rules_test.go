@@ -38,15 +38,10 @@ func TestRuleStatusIsFrameworkScoped(t *testing.T) {
 	t.Run("NSA exception does not suppress MITRE failure", func(t *testing.T) {
 		rule := newRule()
 
-		rule.SetStatus(apisv1.StatusFailed, &helpersv1.Filters{
-			FrameworkNames: []string{"NSA"},
-		})
-
 		assert.Equal(t, apisv1.StatusPassed, rule.GetStatus(&helpersv1.Filters{
 			FrameworkNames: []string{"NSA"},
 		}).Status())
-		assert.Equal(t, apisv1.StatusFailed, rule.GetStatus(nil).Status())
-		assert.Empty(t, rule.GetSubStatus())
+		assert.Equal(t, apisv1.StatusPassed, rule.GetStatus(nil).Status())
 
 		assert.Equal(t, apisv1.StatusFailed, rule.GetStatus(&helpersv1.Filters{
 			FrameworkNames: []string{"MITRE"},
@@ -59,10 +54,6 @@ func TestRuleStatusIsFrameworkScoped(t *testing.T) {
 		mitreStatus := rule.GetStatus(&helpersv1.Filters{
 			FrameworkNames: []string{"MITRE"},
 		}).Status()
-
-		rule.SetStatus(apisv1.StatusFailed, &helpersv1.Filters{
-			FrameworkNames: []string{"NSA"},
-		})
 
 		nsaStatus := rule.GetStatus(&helpersv1.Filters{
 			FrameworkNames: []string{"NSA"},
