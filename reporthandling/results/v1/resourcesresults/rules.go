@@ -19,6 +19,15 @@ func (rule *ResourceAssociatedRule) SetName(n string) {
 
 // GetStatus get rule status
 func (rule *ResourceAssociatedRule) GetStatus(f *helpersv1.Filters) apis.IStatus {
+	if f != nil && rule.Status == apis.StatusFailed {
+		if len(f.FilterExceptions(rule.Exception)) > 0 {
+			return &apis.StatusInfo{
+				InnerStatus: apis.StatusPassed,
+				SubStatus:   apis.SubStatusException,
+			}
+		}
+	}
+
 	return helpersv1.NewStatus(rule.Status)
 }
 
@@ -29,27 +38,29 @@ func (rule *ResourceAssociatedRule) GetSubStatus() apis.ScanningSubStatus {
 
 // SetStatus set rule status and sub status
 func (rule *ResourceAssociatedRule) SetStatus(s apis.ScanningStatus, f *helpersv1.Filters) {
+	if f != nil {
+		if s == apis.StatusPassed {
+			rule.Status = apis.StatusPassed
+			return
+		}
+
+		if len(f.FilterExceptions(rule.Exception)) > 0 {
+			return
+		}
+	}
+
 	if s == apis.StatusPassed {
 		rule.Status = apis.StatusPassed
 		return
 	}
-	if f != nil {
-		if len(f.FilterExceptions(rule.Exception)) > 0 {
-			rule.Status = apis.StatusPassed
-			rule.SubStatus = apis.SubStatusException
-			return
-		} else {
-			rule.Status = s
-			return
-		}
-	} else {
+
+	if f == nil {
 		if len(rule.Exception) > 0 {
 			rule.Status = apis.StatusPassed
 			rule.SubStatus = apis.SubStatusException
 			return
-		} else {
-			rule.Status = s
-			return
 		}
 	}
+
+	rule.Status = s
 }

@@ -6,8 +6,10 @@ import (
 
 	_ "embed"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -76,6 +78,54 @@ func TestSetStatus(t *testing.T) {
 	assert.Equal(t, string(apis.SubStatusNotEvaluatedInfo), r7.GetStatus(nil).Info())
 	assert.True(t, r7.GetStatus(nil).IsSkipped())
 
+}
+
+func TestControlStatusIsFrameworkScoped(t *testing.T) {
+	exception := armotypes.PostureExceptionPolicy{
+		PosturePolicies: []armotypes.PosturePolicy{
+			{
+				FrameworkName: "NSA",
+				ControlID:     "C-0034",
+				RuleName:      "R1",
+			},
+		},
+	}
+
+	control := ResourceAssociatedControl{
+		ControlID: "C-0034",
+		Status: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+		ResourceAssociatedRules: []ResourceAssociatedRule{
+			{
+				Name:      "R1",
+				Status:    apis.StatusFailed,
+				Exception: []armotypes.PostureExceptionPolicy{exception},
+			},
+		},
+	}
+
+	t.Run("NSA exception produces passed with exception", func(t *testing.T) {
+		status := control.GetStatus(&helpersv1.Filters{
+			FrameworkNames: []string{"NSA"},
+		})
+
+		assert.Equal(t, apis.StatusPassed, status.Status())
+	})
+
+	t.Run("MITRE remains failed", func(t *testing.T) {
+		status := control.GetStatus(&helpersv1.Filters{
+			FrameworkNames: []string{"MITRE"},
+		})
+
+		assert.Equal(t, apis.StatusFailed, status.Status())
+	})
+
+	t.Run("aggregate remains failed", func(t *testing.T) {
+		status := control.GetStatus(nil)
+
+		assert.Equal(t, apis.StatusFailed, status.Status())
+	})
 }
 
 func TestSetStatusAddsSubStatusInfo(t *testing.T) {

@@ -45,6 +45,17 @@ func (control *ResourceAssociatedControl) GetStatus(f *helpersv1.Filters) apis.I
 		return helpersv1.NewStatus(status)
 	}
 
+	// When a framework filter is provided, calculate the control status
+	// from its rules instead of using the stored aggregate status.
+	if f != nil {
+		status := apis.StatusPassed
+		for i := range control.ResourceAssociatedRules {
+			ruleStatus := control.ResourceAssociatedRules[i].GetStatus(f).Status()
+			status = apis.Compare(status, ruleStatus)
+		}
+		return helpersv1.NewStatus(status)
+	}
+
 	return &control.Status
 }
 

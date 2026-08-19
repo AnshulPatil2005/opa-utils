@@ -41,20 +41,34 @@ func (f *Filters) ListFrameworkNames() []string {
 // 	FrameworkName string // Framework name may effect the status
 // }
 
-// FilterExceptions get list of exceptions and return the list of filtered exceptions
+// FilterExceptions returns exceptions containing only posture policies
+// that match the configured framework filters.
 func (f *Filters) FilterExceptions(exceptions []armotypes.PostureExceptionPolicy) []armotypes.PostureExceptionPolicy {
-	if len(f.ListFrameworkNames()) == 0 || len(exceptions) == 0 { // there is nothing to filter
+	if len(f.ListFrameworkNames()) == 0 || len(exceptions) == 0 {
 		return exceptions
 	}
+
 	filteredExceptions := []armotypes.PostureExceptionPolicy{}
+
 	for i := range exceptions {
+		filteredPolicies := []armotypes.PosturePolicy{}
+
 		for j := range exceptions[i].PosturePolicies {
-			if exceptions[i].PosturePolicies[j].FrameworkName == "" ||
-				str.StringInSliceCaseInsensitive(f.ListFrameworkNames(), exceptions[i].PosturePolicies[j].FrameworkName) {
-				filteredExceptions = append(filteredExceptions, exceptions[i])
+			policy := exceptions[i].PosturePolicies[j]
+
+			if policy.FrameworkName == "" ||
+				str.StringInSliceCaseInsensitive(f.ListFrameworkNames(), policy.FrameworkName) {
+				filteredPolicies = append(filteredPolicies, policy)
 			}
 		}
+
+		if len(filteredPolicies) > 0 {
+			filteredException := exceptions[i]
+			filteredException.PosturePolicies = filteredPolicies
+			filteredExceptions = append(filteredExceptions, filteredException)
+		}
 	}
+
 	return filteredExceptions
 }
 
