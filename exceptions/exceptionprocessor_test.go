@@ -1903,3 +1903,114 @@ func TestHasException_RegoResponseVector_BaseFallthroughNegativeSelector(t *test
 		})
 	}
 }
+
+// TestGetResourceExceptions_EmptyResourcesMatchesEverywhere pins issue-3368
+// (kubescape/kubescape#3368): an exception with no Resources at all must apply
+// with no scope constraint - the same "no resources = no scope constraint"
+// convention kubescape already documents and relies on for manual controls
+// (hasExplicitControlException) - instead of matching nothing, which is what
+// getResourceExceptions did before this fix (its designator loop has zero
+// iterations when Resources is empty).
+func TestGetResourceExceptions_EmptyResourcesMatchesEverywhere(t *testing.T) {
+	p := NewProcessor()
+
+	anyWorkload, err := workloadinterface.NewBaseObjBytes([]byte(`{"apiVersion":"v1","kind":"Deployment","metadata":{"name":"anything","namespace":"anywhere"}}`))
+	require.NoError(t, err)
+
+	scopeLessException := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "scope-less"},
+		PolicyType:      "postureExceptionPolicy",
+		PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "MITRE"}},
+		// Resources deliberately nil.
+	}
+
+	res := p.GetResourceExceptions([]armotypes.PostureExceptionPolicy{scopeLessException}, anyWorkload, "any-cluster")
+	require.Len(t, res, 1, "a scope-less exception (no Resources) must match an arbitrary workload on an arbitrary cluster")
+}
+
+// TestGetResourceExceptions_EmptyResourcesWithObjectSelectorStillConstrains
+// confirms the fix is additive, not a blanket bypass: when a scope-less
+// exception also carries an ObjectSelector, that selector still constrains
+// which workloads it applies to - only the designator axis (cluster/
+// namespace/name/kind/labels/path) is left unconstrained by an empty
+// Resources list.
+func TestGetResourceExceptions_EmptyResourcesWithObjectSelectorStillConstrains(t *testing.T) {
+	p := NewProcessor()
+
+	labeledWorkload, err := workloadinterface.NewBaseObjBytes([]byte(`{"apiVersion":"v1","kind":"Deployment","metadata":{"name":"web","namespace":"default","labels":{"app":"web"}}}`))
+	require.NoError(t, err)
+	unlabeledWorkload, err := workloadinterface.NewBaseObjBytes([]byte(`{"apiVersion":"v1","kind":"Deployment","metadata":{"name":"web","namespace":"default"}}`))
+	require.NoError(t, err)
+
+	scopeLessWithSelector := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "scope-less-with-selector"},
+		PolicyType:      "postureExceptionPolicy",
+		PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "MITRE"}},
+		ObjectSelector:  &armotypes.LabelSelector{MatchLabels: map[string]string{"app": "web"}},
+		// Resources deliberately nil.
+	}
+
+	matched := p.GetResourceExceptions([]armotypes.PostureExceptionPolicy{scopeLessWithSelector}, labeledWorkload, "any-cluster")
+	assert.Len(t, matched, 1, "the workload carries the selected label, so the scope-less exception should still apply")
+
+	unmatched := p.GetResourceExceptions([]armotypes.PostureExceptionPolicy{scopeLessWithSelector}, unlabeledWorkload, "any-cluster")
+	assert.Empty(t, unmatched, "the workload lacks the selected label, so a scope-less exception must not blanket-match it")
+}
+
+// TestGetResourceExceptions_EmptyResourcesDifferentControlDoesNotMatch confirms
+// the scope-less match is still gated by ListRuleExceptions/PosturePolicies
+// upstream in the normal pipeline - GetResourceExceptions itself does not
+// filter by control, but this documents that a scope-less exception is not
+// some universal always-true policy independent of what selected it.
+func TestGetResourceExceptions_EmptyResourcesDifferentControlDoesNotMatch(t *testing.T) {
+	p := NewProcessor()
+
+	workload, err := workloadinterface.NewBaseObjBytes([]byte(`{"apiVersion":"v1","kind":"Deployment","metadata":{"name":"web","namespace":"default"}}`))
+	require.NoError(t, err)
+
+	scopeLessException := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "scope-less-for-C-0034"},
+		PolicyType:      "postureExceptionPolicy",
+		PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}},
+	}
+
+	// ListRuleExceptions is the actual PosturePolicies gate; GetResourceExceptions
+	// receives only what already survived it, matching the real pipeline
+	// (SetRuleExceptions -> ListRuleExceptions -> SetRuleResponsExceptions -> getResourceExceptions).
+	forThisControl := p.ListRuleExceptions([]armotypes.PostureExceptionPolicy{scopeLessException}, "", "C-0034", "")
+	require.Len(t, forThisControl, 1)
+	matched := p.GetResourceExceptions(forThisControl, workload, "any-cluster")
+	assert.Len(t, matched, 1)
+
+	forOtherControl := p.ListRuleExceptions([]armotypes.PostureExceptionPolicy{scopeLessException}, "", "C-0035", "")
+	assert.Empty(t, forOtherControl, "a scope-less exception still only targets the control(s) its PosturePolicies name")
+}
+
+// TestSetRuleResponsExceptions_EmptyResourcesMatchesEverywhere exercises the
+// fix through SetRuleResponsExceptions (the entry point SetRuleExceptions ->
+// SetControlExceptions -> SetFrameworkExceptions actually use), not just the
+// lower-level GetResourceExceptions, since issue-3368 named both entry points.
+func TestSetRuleResponsExceptions_EmptyResourcesMatchesEverywhere(t *testing.T) {
+	p := NewProcessor()
+
+	workloadObj, err := workloadinterface.NewBaseObjBytes([]byte(`{"apiVersion":"v1","kind":"Deployment","metadata":{"name":"web","namespace":"default"}}`))
+	require.NoError(t, err)
+
+	scopeLessException := armotypes.PostureExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "scope-less"},
+		PolicyType: "postureExceptionPolicy",
+	}
+
+	results := []reporthandling.RuleResponse{
+		{
+			AlertObject: reporthandling.AlertObject{
+				K8SApiObjects: []map[string]interface{}{workloadObj.GetObject()},
+			},
+		},
+	}
+
+	p.SetRuleResponsExceptions(results, []armotypes.PostureExceptionPolicy{scopeLessException}, "any-cluster")
+
+	require.NotNil(t, results[0].Exception, "a scope-less exception must still be attached via SetRuleResponsExceptions")
+	assert.Equal(t, "scope-less", results[0].Exception.GetName())
+}
