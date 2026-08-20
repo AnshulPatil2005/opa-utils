@@ -36,13 +36,12 @@ func (control *ResourceAssociatedControl) isOldControl() bool {
 // Status get control status
 func (control *ResourceAssociatedControl) GetStatus(f *helpersv1.Filters) apis.IStatus {
 	if control.isOldControl() {
-		status := apis.StatusPassed
-		for i := range control.ResourceAssociatedRules {
-			// we must set the status since this is an old flow and the calculation of the status wasn't done
-			control.ResourceAssociatedRules[i].SetStatus(control.ResourceAssociatedRules[i].GetStatus(f).Status(), f)
-			status = apis.Compare(status, control.ResourceAssociatedRules[i].GetStatus(f).Status())
-		}
-		return helpersv1.NewStatus(status)
+		return control.rulesStatus(f)
+	}
+
+	if f != nil {
+		status := control.rulesStatus(f)
+		return control.applyActionRequiredStatus(status)
 	}
 
 	return &control.Status
@@ -51,16 +50,47 @@ func (control *ResourceAssociatedControl) GetStatus(f *helpersv1.Filters) apis.I
 // GetSubStatus get control sub status
 func (control *ResourceAssociatedControl) GetSubStatus() apis.ScanningSubStatus {
 	if control.isOldControl() {
-		status := apis.StatusPassed
-		subStatus := apis.SubStatusUnknown
-
-		for i := range control.ResourceAssociatedRules {
-			control.ResourceAssociatedRules[i].SetStatus(control.ResourceAssociatedRules[i].GetStatus(nil).Status(), nil)
-			status, subStatus = apis.CompareStatusAndSubStatus(status, control.ResourceAssociatedRules[i].GetStatus(nil).Status(), subStatus, control.ResourceAssociatedRules[i].GetSubStatus())
-		}
-		return subStatus
+		return control.rulesStatus(nil).GetSubStatus()
 	}
 	return control.Status.SubStatus
+}
+
+func (control *ResourceAssociatedControl) rulesStatus(f *helpersv1.Filters) apis.IStatus {
+	status := apis.StatusPassed
+	subStatus := apis.SubStatusUnknown
+	for i := range control.ResourceAssociatedRules {
+		ruleStatus := control.ResourceAssociatedRules[i].GetStatus(f)
+		status, subStatus = apis.CompareStatusAndSubStatus(status, ruleStatus.Status(), subStatus, ruleStatus.GetSubStatus())
+	}
+	return &apis.StatusInfo{
+		InnerStatus: status,
+		SubStatus:   subStatus,
+		InnerInfo:   apis.SubStatusInfo(subStatus),
+	}
+}
+
+func (control *ResourceAssociatedControl) applyActionRequiredStatus(status apis.IStatus) apis.IStatus {
+	if status.Status() == apis.StatusFailed {
+		switch control.actionRequired {
+		case apis.SubStatusRequiresReview, apis.SubStatusManualReview:
+			return &apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   control.actionRequired,
+				InnerInfo:   apis.SubStatusInfo(control.actionRequired),
+			}
+		}
+	}
+
+	if control.actionRequired == apis.SubStatusConfiguration &&
+		controlMissingAllConfigurations(control) && status.GetSubStatus() != apis.SubStatusNotEvaluated {
+		return &apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusConfiguration,
+			InnerInfo:   apis.SubStatusInfo(apis.SubStatusConfiguration),
+		}
+	}
+
+	return status
 }
 
 // SetStatus set control status and sub status
@@ -77,10 +107,11 @@ func (control *ResourceAssociatedControl) SetStatus(c reporthandling.Control) {
 	status := apis.StatusPassed
 	subStatus := apis.SubStatusUnknown
 	statusInfo := ""
-	for i := range control.ResourceAssociatedRules {
-		status, subStatus = apis.CompareStatusAndSubStatus(status, control.ResourceAssociatedRules[i].GetStatus(nil).Status(), subStatus, control.ResourceAssociatedRules[i].GetSubStatus())
-	}
+	rulesStatus := control.rulesStatus(nil)
+	status = rulesStatus.Status()
+	subStatus = rulesStatus.GetSubStatus()
 	actionRequiredStr := c.GetActionRequiredAttribute()
+	control.actionRequired = apis.ScanningSubStatus(actionRequiredStr)
 	if actionRequiredStr == "" {
 		control.Status.InnerStatus = status
 		control.Status.SubStatus = subStatus

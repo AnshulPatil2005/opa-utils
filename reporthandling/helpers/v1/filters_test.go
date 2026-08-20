@@ -68,3 +68,35 @@ func TestFilterExceptions(t *testing.T) {
 	exceptions7 := f.FilterExceptions(exceptions6)
 	assert.Equal(t, 0, len(exceptions7))
 }
+
+func TestFilterExceptionsPreservesPolicyTuple(t *testing.T) {
+	exception := armotypes.PostureExceptionPolicy{
+		PosturePolicies: []armotypes.PosturePolicy{
+			{
+				FrameworkName: "NSA",
+				ControlID:     "C-0034",
+				RuleName:      "R1",
+			},
+			{
+				FrameworkName: "MITRE",
+				ControlID:     "C-0034",
+				RuleName:      "R2",
+			},
+		},
+	}
+
+	f := Filters{
+		FrameworkNames: []string{"MITRE"},
+	}
+
+	filtered := f.FilterExceptions(
+		[]armotypes.PostureExceptionPolicy{exception},
+	)
+
+	assert.Len(t, filtered, 1)
+	assert.Len(t, filtered[0].PosturePolicies, 1)
+
+	assert.Equal(t, "MITRE", filtered[0].PosturePolicies[0].FrameworkName)
+	assert.Equal(t, "C-0034", filtered[0].PosturePolicies[0].ControlID)
+	assert.Equal(t, "R2", filtered[0].PosturePolicies[0].RuleName)
+}

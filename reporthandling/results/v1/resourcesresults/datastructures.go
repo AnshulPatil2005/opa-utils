@@ -22,6 +22,7 @@ type ResourceAssociatedControl struct {
 	Name                    string                   `json:"name"`
 	Status                  apis.StatusInfo          `json:"status"`
 	ResourceAssociatedRules []ResourceAssociatedRule `json:"rules,omitempty"`
+	actionRequired          apis.ScanningSubStatus
 }
 
 // ResourceAssociatedRule failed rule that is associated to a resource

@@ -8,6 +8,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -140,4 +142,28 @@ func TestSetExceptions(t *testing.T) {
 	result3.SetExceptions(w, exceptions, "unitest2", c, WithExceptionsProcessor(processor))
 	assert.Equal(t, 2, result3.ListControlsIDs(nil).Passed())
 	assert.Equal(t, 1, result3.ListControlsIDs(nil).Failed())
+}
+
+func TestSetExceptionsKeepsRuleStatusForFrameworkScopedEvaluation(t *testing.T) {
+	w := workloadinterface.NewWorkloadMock(nil)
+	policy := mockExceptionDeploymentC0087()
+	policy.PosturePolicies[0].FrameworkName = "NSA"
+	policy.PosturePolicies[0].RuleName = "ruleA"
+
+	result := Result{AssociatedControls: []ResourceAssociatedControl{{
+		ControlID: "C-0087",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []ResourceAssociatedRule{
+			*mockResourceAssociatedRuleA(),
+		},
+	}}}
+
+	result.SetExceptions(w, []armotypes.PostureExceptionPolicy{*policy}, "", map[string]reporthandling.Control{"C-0087": {}})
+
+	rule := result.AssociatedControls[0].ResourceAssociatedRules[0]
+	assert.Equal(t, apis.StatusFailed, rule.Status, "exceptions must not overwrite the raw rule status")
+	assert.Equal(t, apis.StatusPassed, result.AssociatedControls[0].GetStatus(nil).Status())
+	assert.Equal(t, apis.SubStatusException, result.AssociatedControls[0].GetStatus(nil).GetSubStatus())
+	assert.Equal(t, apis.StatusPassed, result.AssociatedControls[0].GetStatus(&helpersv1.Filters{FrameworkNames: []string{"NSA"}}).Status())
+	assert.Equal(t, apis.StatusFailed, result.AssociatedControls[0].GetStatus(&helpersv1.Filters{FrameworkNames: []string{"MITRE"}}).Status())
 }
