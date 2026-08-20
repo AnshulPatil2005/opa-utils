@@ -168,6 +168,25 @@ func (p *Processor) getResourceExceptions(ruleExceptions []armotypes.PostureExce
 		if !ok {
 			continue // malformed selector: the exception matches nothing
 		}
+
+		// No Resources at all = no scope constraint, matches everywhere - the same
+		// "no resources = no scope constraint" convention kubescape's own
+		// hasExplicitControlException already applies for manual controls (which have
+		// no workload to match a designator against at all). An ObjectSelector, if
+		// present, still constrains which workloads this applies to; only the
+		// designator axis (cluster/namespace/name/kind/labels/path) is left
+		// unconstrained. This intentionally bypasses hasException's guard against an
+		// all-empty-fielded PortalDesignator: that guard protects against a populated
+		// Resources entry whose fields all happen to be empty (a different footgun),
+		// not against Resources itself being an empty list.
+		if len(ruleException.Resources) == 0 {
+			emptyAttributes := p.getAttributes(&identifiers.PortalDesignator{})
+			if p.hasExceptionForAttributes(clusterName, emptyAttributes, workload, failingContainerNames, selector) {
+				postureExceptionPolicy = append(postureExceptionPolicy, ruleException)
+			}
+			continue
+		}
+
 		for _, resourceToPin := range ruleException.Resources {
 			resource := resourceToPin
 			if p.hasException(clusterName, &resource, workload, failingContainerNames, selector) {
@@ -252,6 +271,16 @@ func (p *Processor) hasException(clusterName string, designator *identifiers.Por
 		return false // if designators are empty
 	}
 
+	return p.hasExceptionForAttributes(clusterName, attributes, workload, failingContainerNames, selector)
+}
+
+// hasExceptionForAttributes is hasException without the leading guard against an
+// all-empty-fielded PortalDesignator. That guard exists to reject a populated
+// Resources entry whose fields all happen to be empty (a likely misconfiguration);
+// it has nothing to do with the Resources list itself being empty, which
+// getResourceExceptions already handles as its own, deliberate "matches
+// everywhere" case and calls this directly for.
+func (p *Processor) hasExceptionForAttributes(clusterName string, attributes identifiers.AttributesDesignators, workload workloadinterface.IMetadata, failingContainerNames []string, selector labels.Selector) bool {
 	if !p.matchesCluster(attributes, clusterName) {
 		return false // cluster name does not match
 	}
