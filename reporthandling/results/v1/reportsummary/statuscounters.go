@@ -16,6 +16,7 @@ type ICounters interface {
 type ISubCounters interface {
 	All() int
 	Ignored() int
+	Acknowledged() int
 }
 
 // =================================== Counters ============================================
@@ -55,11 +56,18 @@ func (resourceCounters *StatusCounters) All() int {
 // =================================== SubCounters ============================================
 
 func (subStatusCounters *SubStatusCounters) All() int {
-	return subStatusCounters.Ignored()
+	return subStatusCounters.Ignored() + subStatusCounters.Acknowledged()
 }
 
+// Ignored counts resources suppressed by a disable exception: passed w/exceptions.
 func (subStatusCounters *SubStatusCounters) Ignored() int {
 	return subStatusCounters.IgnoredResources
+}
+
+// Acknowledged counts resources an alertOnly exception marked as accepted risk
+// while they keep failing: failed w/exceptions.
+func (subStatusCounters *SubStatusCounters) Acknowledged() int {
+	return subStatusCounters.AcknowledgedResources
 }
 
 // =================================== Setters ============================================
@@ -78,7 +86,13 @@ func (resourceCounters *StatusCounters) Increase(status apis.IStatus) {
 
 // Increase increases the counter based on the status
 func (subStatusCounters *SubStatusCounters) Increase(status apis.IStatus) {
-	if status.IsPassed() && status.GetSubStatus() == apis.SubStatusException {
+	if status.GetSubStatus() != apis.SubStatusException {
+		return
+	}
+	switch {
+	case status.IsPassed():
 		subStatusCounters.IgnoredResources++
+	case status.IsFailed():
+		subStatusCounters.AcknowledgedResources++
 	}
 }

@@ -118,3 +118,31 @@ func TestSubStatusInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestCompareStatusAndSubStatus_FailedCarriesException(t *testing.T) {
+	// An alertOnly exception keeps the finding failing while annotating it, so the
+	// exception sub status has to survive aggregation onto a failed status.
+	status, subStatus := CompareStatusAndSubStatus(StatusFailed, StatusPassed, SubStatusException, SubStatusUnknown)
+	assert.Equal(t, StatusFailed, status)
+	assert.Equal(t, SubStatusException, subStatus)
+
+	// A plain failure alongside an acknowledged one still reports the annotation.
+	status, subStatus = CompareStatusAndSubStatus(StatusFailed, StatusFailed, SubStatusUnknown, SubStatusException)
+	assert.Equal(t, StatusFailed, status)
+	assert.Equal(t, SubStatusException, subStatus)
+
+	// A failure with no exception at all carries no sub status.
+	status, subStatus = CompareStatusAndSubStatus(StatusFailed, StatusPassed, SubStatusUnknown, SubStatusUnknown)
+	assert.Equal(t, StatusFailed, status)
+	assert.Equal(t, SubStatusUnknown, subStatus)
+
+	// Sub statuses that belong to other statuses are not dragged onto a failure.
+	status, subStatus = CompareStatusAndSubStatus(StatusFailed, StatusSkipped, SubStatusUnknown, SubStatusNotEvaluated)
+	assert.Equal(t, StatusFailed, status)
+	assert.Equal(t, SubStatusUnknown, subStatus)
+
+	// Unknown stays unannotated.
+	status, subStatus = CompareStatusAndSubStatus(StatusUnknown, StatusUnknown, SubStatusException, SubStatusUnknown)
+	assert.Equal(t, StatusUnknown, status)
+	assert.Equal(t, SubStatusUnknown, subStatus)
+}

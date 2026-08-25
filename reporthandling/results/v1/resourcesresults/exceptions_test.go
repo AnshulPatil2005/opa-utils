@@ -110,15 +110,23 @@ func mockControlsList() map[string]reporthandling.Control {
 	}
 }
 
+// withActions overrides the action on a mock policy. The suppression tests below
+// pin it to Disable so they keep exercising which exceptions match, independently
+// of what each action then does to the status.
+func withActions(policy *armotypes.PostureExceptionPolicy, actions ...armotypes.PostureExceptionPolicyActions) *armotypes.PostureExceptionPolicy {
+	policy.Actions = actions
+	return policy
+}
+
 func TestSetExceptions(t *testing.T) {
 	w := workloadinterface.NewWorkloadMock(nil)
 	processor := exceptions.NewProcessor()
 
 	exceptions := []armotypes.PostureExceptionPolicy{}
-	exceptions = append(exceptions, *mockExceptionDeploymentC0087())
-	exceptions = append(exceptions, *mockExceptionUnitestDeploymentC0087())
-	exceptions = append(exceptions, *mockExceptionUnitestC0088())
-	exceptions = append(exceptions, *mockExceptionDeploymentC0089())
+	exceptions = append(exceptions, *withActions(mockExceptionDeploymentC0087(), armotypes.Disable))
+	exceptions = append(exceptions, *withActions(mockExceptionUnitestDeploymentC0087(), armotypes.Disable))
+	exceptions = append(exceptions, *withActions(mockExceptionUnitestC0088(), armotypes.Disable))
+	exceptions = append(exceptions, *withActions(mockExceptionDeploymentC0089(), armotypes.Disable))
 	c := mockControlsList()
 	// simple test
 	result1 := mockResultFailed()
@@ -145,25 +153,59 @@ func TestSetExceptions(t *testing.T) {
 }
 
 func TestSetExceptionsKeepsRuleStatusForFrameworkScopedEvaluation(t *testing.T) {
-	w := workloadinterface.NewWorkloadMock(nil)
-	policy := mockExceptionDeploymentC0087()
-	policy.PosturePolicies[0].FrameworkName = "NSA"
-	policy.PosturePolicies[0].RuleName = "ruleA"
-
-	result := Result{AssociatedControls: []ResourceAssociatedControl{{
-		ControlID: "C-0087",
-		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
-		ResourceAssociatedRules: []ResourceAssociatedRule{
-			*mockResourceAssociatedRuleA(),
+	// Framework scoping behaves the same for both actions: the exception applies to
+	// the framework it names and not to any other. What differs is the status the
+	// applied exception then produces.
+	tests := []struct {
+		name           string
+		action         armotypes.PostureExceptionPolicyActions
+		expectedStatus apis.ScanningStatus
+	}{
+		{
+			name:           "disable suppresses the finding",
+			action:         armotypes.Disable,
+			expectedStatus: apis.StatusPassed,
 		},
-	}}}
+		{
+			name:           "alertOnly acknowledges the finding but keeps it failing",
+			action:         armotypes.AlertOnly,
+			expectedStatus: apis.StatusFailed,
+		},
+	}
 
-	result.SetExceptions(w, []armotypes.PostureExceptionPolicy{*policy}, "", map[string]reporthandling.Control{"C-0087": {}})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := workloadinterface.NewWorkloadMock(nil)
+			policy := withActions(mockExceptionDeploymentC0087(), tt.action)
+			policy.PosturePolicies[0].FrameworkName = "NSA"
+			policy.PosturePolicies[0].RuleName = "ruleA"
 
-	rule := result.AssociatedControls[0].ResourceAssociatedRules[0]
-	assert.Equal(t, apis.StatusFailed, rule.Status, "exceptions must not overwrite the raw rule status")
-	assert.Equal(t, apis.StatusPassed, result.AssociatedControls[0].GetStatus(nil).Status())
-	assert.Equal(t, apis.SubStatusException, result.AssociatedControls[0].GetStatus(nil).GetSubStatus())
-	assert.Equal(t, apis.StatusPassed, result.AssociatedControls[0].GetStatus(&helpersv1.Filters{FrameworkNames: []string{"NSA"}}).Status())
-	assert.Equal(t, apis.StatusFailed, result.AssociatedControls[0].GetStatus(&helpersv1.Filters{FrameworkNames: []string{"MITRE"}}).Status())
+			result := Result{AssociatedControls: []ResourceAssociatedControl{{
+				ControlID: "C-0087",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []ResourceAssociatedRule{
+					*mockResourceAssociatedRuleA(),
+				},
+			}}}
+
+			result.SetExceptions(w, []armotypes.PostureExceptionPolicy{*policy}, "", map[string]reporthandling.Control{"C-0087": {}})
+
+			control := result.AssociatedControls[0]
+			rule := control.ResourceAssociatedRules[0]
+			assert.Equal(t, apis.StatusFailed, rule.Status, "exceptions must not overwrite the raw rule status")
+
+			assert.Equal(t, tt.expectedStatus, control.GetStatus(nil).Status())
+			assert.Equal(t, apis.SubStatusException, control.GetStatus(nil).GetSubStatus())
+
+			// The exception names NSA, so it applies there and nowhere else.
+			nsa := control.GetStatus(&helpersv1.Filters{FrameworkNames: []string{"NSA"}})
+			assert.Equal(t, tt.expectedStatus, nsa.Status())
+			assert.Equal(t, apis.SubStatusException, nsa.GetSubStatus())
+
+			mitre := control.GetStatus(&helpersv1.Filters{FrameworkNames: []string{"MITRE"}})
+			assert.Equal(t, apis.StatusFailed, mitre.Status())
+			assert.Equal(t, apis.SubStatusUnknown, mitre.GetSubStatus(),
+				"an exception scoped to another framework must not annotate this one")
+		})
+	}
 }

@@ -80,7 +80,14 @@ func (controlSummary *ControlSummary) calculateNSetSubStatus(subStatus apis.Scan
 			controlSummary.StatusInfo.InnerInfo = apis.SubStatusInfo(apis.SubStatusRequiresReview)
 		}
 	case apis.StatusFailed:
-		controlSummary.StatusInfo.SubStatus = apis.SubStatusUnknown
+		// A failing control keeps the exception sub status when an alertOnly
+		// exception acknowledged at least one of its resources. The exact split
+		// between plain and acknowledged failures is in SubStatusCounters.
+		if subStatus == apis.SubStatusException || controlSummary.StatusInfo.SubStatus == apis.SubStatusException {
+			controlSummary.StatusInfo.SubStatus = apis.SubStatusException
+		} else {
+			controlSummary.StatusInfo.SubStatus = apis.SubStatusUnknown
+		}
 		controlSummary.StatusInfo.InnerInfo = ""
 	}
 }

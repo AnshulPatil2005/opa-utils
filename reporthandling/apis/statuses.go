@@ -86,7 +86,12 @@ func Compare(a, b ScanningStatus) ScanningStatus {
 // CompareStatusAndSubStatus receive two statuses + sub statuses and returns the more significant one
 /*
 	status/sub status level:
-		1. status=failed or status=unknown:
+		1. status=failed:
+			if aSub or bSub are exception:
+				sub status = exception (an alertOnly exception acknowledged the failure)
+			else:
+				sub status = status=unknown
+		1a. status=unknown:
 			sub status = ""
 		2. status=skipped:
 			if aSub or bSub are notEvaluated/configuration/integration/review:
@@ -102,7 +107,15 @@ func Compare(a, b ScanningStatus) ScanningStatus {
 func CompareStatusAndSubStatus(a, b ScanningStatus, aSub, bSub ScanningSubStatus) (ScanningStatus, ScanningSubStatus) {
 	status := Compare(a, b)
 	switch status {
-	case StatusFailed, StatusUnknown:
+	case StatusFailed:
+		// A failure acknowledged by an alertOnly exception keeps failing, but carries
+		// the exception sub status so the report can tell an accepted risk apart from
+		// an unreviewed one.
+		if aSub == SubStatusException || bSub == SubStatusException {
+			return status, SubStatusException
+		}
+		return status, SubStatusUnknown
+	case StatusUnknown:
 		return status, SubStatusUnknown
 	case StatusPassed:
 		if aSub == SubStatusException || bSub == SubStatusException {
