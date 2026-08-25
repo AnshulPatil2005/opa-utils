@@ -71,7 +71,12 @@ type StatusCounters struct {
 }
 
 type SubStatusCounters struct {
+	// IgnoredResources counts resources whose finding was suppressed by an
+	// exception with a disable action: passed w/exceptions.
 	IgnoredResources int `json:"ignoredResources"`
+	// AcknowledgedResources counts resources whose finding was acknowledged by an
+	// alertOnly exception but still fails: failed w/exceptions.
+	AcknowledgedResources int `json:"acknowledgedResources"`
 }
 
 type SeverityCounters struct {

@@ -151,3 +151,86 @@ func TestSubStatusCounters_Increase(t *testing.T) {
 		})
 	}
 }
+
+func TestSubStatusCounters_IgnoredVsAcknowledged(t *testing.T) {
+	counters := &SubStatusCounters{}
+
+	// disable exception: suppressed, counted as ignored
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusPassed, SubStatus: apis.SubStatusException})
+	// alertOnly exception: still failing, counted as acknowledged
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusFailed, SubStatus: apis.SubStatusException})
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusFailed, SubStatus: apis.SubStatusException})
+	// unrelated statuses do not move either counter
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusFailed})
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusPassed})
+	counters.Increase(&apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated})
+
+	assert.Equal(t, 1, counters.Ignored())
+	assert.Equal(t, 2, counters.Acknowledged())
+	assert.Equal(t, 3, counters.All())
+}
+
+func TestControlSummaryAppend_AlertOnlyStillCountsAsFailed(t *testing.T) {
+	// The compliance score is passed/all, so an acknowledged resource has to stay on
+	// the failed side of the counters for the score to reflect the real state.
+	acknowledged := &ControlSummary{}
+	acknowledged.Append(
+		&apis.StatusInfo{InnerStatus: apis.StatusFailed, SubStatus: apis.SubStatusException},
+		"resource-1",
+	)
+
+	statuses, subStatuses := acknowledged.StatusesCounters()
+	assert.Equal(t, 1, statuses.Failed())
+	assert.Equal(t, 0, statuses.Passed())
+	assert.Equal(t, 1, subStatuses.Acknowledged())
+	assert.Equal(t, 0, subStatuses.Ignored())
+
+	suppressed := &ControlSummary{}
+	suppressed.Append(
+		&apis.StatusInfo{InnerStatus: apis.StatusPassed, SubStatus: apis.SubStatusException},
+		"resource-1",
+	)
+
+	statuses, subStatuses = suppressed.StatusesCounters()
+	assert.Equal(t, 0, statuses.Failed())
+	assert.Equal(t, 1, statuses.Passed())
+	assert.Equal(t, 0, subStatuses.Acknowledged())
+	assert.Equal(t, 1, subStatuses.Ignored())
+}
+
+// mirrors updateControlsSummaryCounters: append the resource status, then fold in
+// the resource-level sub status.
+func appendResource(control *ControlSummary, status *apis.StatusInfo, id string) {
+	control.Append(status, id)
+	control.calculateStatus(status.GetSubStatus())
+}
+
+func TestControlSummary_AlertOnlyKeepsControlFailingAndAnnotated(t *testing.T) {
+	control := &ControlSummary{ControlID: "C-0034"}
+	appendResource(control, &apis.StatusInfo{InnerStatus: apis.StatusFailed, SubStatus: apis.SubStatusException}, "a")
+
+	assert.Equal(t, apis.StatusFailed, control.GetStatus().Status())
+	assert.Equal(t, apis.SubStatusException, control.GetStatus().GetSubStatus(),
+		"the report must be able to tell an accepted risk apart from an unreviewed failure")
+}
+
+func TestControlSummary_PlainFailureStaysUnannotated(t *testing.T) {
+	control := &ControlSummary{ControlID: "C-0034"}
+	appendResource(control, &apis.StatusInfo{InnerStatus: apis.StatusFailed}, "a")
+
+	assert.Equal(t, apis.StatusFailed, control.GetStatus().Status())
+	assert.Equal(t, apis.SubStatusUnknown, control.GetStatus().GetSubStatus())
+}
+
+func TestControlSummary_MixedFailuresReportAcknowledgedBreakdown(t *testing.T) {
+	control := &ControlSummary{ControlID: "C-0034"}
+	appendResource(control, &apis.StatusInfo{InnerStatus: apis.StatusFailed}, "a")
+	appendResource(control, &apis.StatusInfo{InnerStatus: apis.StatusFailed, SubStatus: apis.SubStatusException}, "b")
+
+	assert.Equal(t, apis.StatusFailed, control.GetStatus().Status())
+	assert.Equal(t, apis.SubStatusException, control.GetStatus().GetSubStatus())
+
+	statuses, subStatuses := control.StatusesCounters()
+	assert.Equal(t, 2, statuses.Failed(), "both resources still fail")
+	assert.Equal(t, 1, subStatuses.Acknowledged(), "only one of them is an accepted risk")
+}

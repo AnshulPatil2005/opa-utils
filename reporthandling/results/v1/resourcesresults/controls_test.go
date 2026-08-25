@@ -266,13 +266,15 @@ func Test_GetStatusAndSubStatus_OldResourceAssociatedControls(t *testing.T) {
 	assert.NoError(t, err)
 
 	controlIdToExpectedStatus := map[string]string{
-		"C-0054": "passed", // passed w/ exception
+		// C-0054 carries two alertOnly exceptions, which acknowledge the finding
+		// without suppressing it, so the control keeps failing.
+		"C-0054": "failed", // failed w/ exception
 		"C-0067": "failed", // failed
 		"C-0002": "passed", // passed
 	}
 
 	controlIdToExpectedSubStatus := map[string]string{
-		"C-0054": "w/exceptions", // passed w/ exception
+		"C-0054": "w/exceptions", // failed w/ exception
 		"C-0067": "",             // failed
 		"C-0002": "",             // passed
 	}
