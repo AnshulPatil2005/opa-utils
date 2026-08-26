@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func GetPostureReportMock() *PostureReport {
@@ -160,6 +161,100 @@ func TestPostureReportGojayUnmarshal(t *testing.T) {
 	assert.Equal(t, original.Metadata.EncryptionMetadata.DEKAlgorithm, postureReport.Metadata.EncryptionMetadata.DEKAlgorithm)
 	assert.Equal(t, original.Metadata.EncryptionMetadata.KEKAlgorithm, postureReport.Metadata.EncryptionMetadata.KEKAlgorithm)
 	assert.Equal(t, original.Metadata.EncryptionMetadata.EncryptedDEK, postureReport.Metadata.EncryptionMetadata.EncryptedDEK)
+}
+
+func TestPostureReportGojayUnmarshal_ScanContractMetadata(t *testing.T) {
+	emptyList := []string{}
+	frameworks := []string{"nsa"}
+	high := "high"
+	complianceFloor := 80.0
+	coverageFloor := 0.0
+	falseValue := false
+	trueValue := true
+
+	original := &PostureReport{
+		Metadata: Metadata{
+			ScanMetadata: ScanMetadata{
+				ScanContract: &ScanContractMetadata{
+					APIVersion:              "kubescape.io/v1alpha1",
+					Name:                    "repository-baseline",
+					Contract:                "repository-baseline",
+					MinimumKubescapeVersion: "v3.0.0",
+					DigestSchema:            "rfc8785-sha256-v1",
+					ContractDigest:          "sha256:contract",
+					EffectiveRunDigest:      "sha256:effective",
+					Source:                  ".kubescape/scan-contract.yaml",
+					AllowedSections:         []string{"policy", "failure"},
+					DeniedSections:          []string{"output"},
+					Effective: &ScanContractEffectiveSettings{
+						Policy: &ScanContractPolicy{
+							Frameworks:      []string{"nsa"},
+							Controls:        []string{"C-0001"},
+							ControlsVersion: "latest",
+						},
+						Scope: &ScanContractScope{
+							IncludeNamespaces: []string{"production"},
+							ExcludeNamespaces: []string{"kube-system"},
+						},
+						Evaluation: &ScanContractEvaluation{ScanTimeout: "5m", ControlTimeout: "30s"},
+						Failure: &ScanContractFailure{
+							SeverityAtLeast:     &high,
+							ComplianceBelow:     &complianceFloor,
+							CoverageBelow:       &coverageFloor,
+							DegradedPolicyInput: &falseValue,
+						},
+						Output: &ScanContractOutput{Formats: []string{"json"}, OmitRawResources: &trueValue},
+					},
+					RunnerInputs: []ScanContractRunnerInput{
+						{Role: "controls", Source: ".kubescape/controls.yaml", Digest: "sha256:controls"},
+						{Role: "exceptions", Source: "external", Digest: "sha256:exceptions"},
+					},
+					GateResolution: &ScanContractGateResolution{
+						SeverityAtLeast: ScanContractStringGateResolution{Contract: &high, Effective: &high},
+						ComplianceBelow: ScanContractNumberGateResolution{Contract: &complianceFloor, RunnerFloor: &coverageFloor, Effective: &complianceFloor},
+						CoverageBelow:   ScanContractNumberGateResolution{Contract: &coverageFloor, Effective: &coverageFloor},
+						DegradedPolicyInput: ScanContractBoolGateResolution{
+							Contract:  &falseValue,
+							Effective: &falseValue,
+						},
+					},
+					OrdinaryCLIOverrides: &ScanContractCLIOverrides{
+						Policy: &ScanContractPolicyOverrides{Frameworks: &frameworks, Controls: &emptyList},
+						Scope:  &ScanContractScopeOverrides{ExcludeNamespaces: &emptyList},
+						Output: &ScanContractOutputOverrides{Formats: &emptyList, OmitRawResources: &falseValue},
+					},
+				},
+			},
+		},
+	}
+
+	payload, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	decoded := &PostureReport{}
+	require.NoError(t, gojay.NewDecoder(bytes.NewReader(payload)).Decode(decoded))
+
+	contract := decoded.Metadata.ScanMetadata.ScanContract
+	require.NotNil(t, contract)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.APIVersion, contract.APIVersion)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.ContractDigest, contract.ContractDigest)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.EffectiveRunDigest, contract.EffectiveRunDigest)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.Effective, contract.Effective)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.RunnerInputs, contract.RunnerInputs)
+	assert.Equal(t, original.Metadata.ScanMetadata.ScanContract.GateResolution, contract.GateResolution)
+
+	require.NotNil(t, contract.OrdinaryCLIOverrides)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Policy)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Policy.Controls)
+	assert.Empty(t, *contract.OrdinaryCLIOverrides.Policy.Controls)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Scope)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Scope.ExcludeNamespaces)
+	assert.Empty(t, *contract.OrdinaryCLIOverrides.Scope.ExcludeNamespaces)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Output)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Output.Formats)
+	assert.Empty(t, *contract.OrdinaryCLIOverrides.Output.Formats)
+	require.NotNil(t, contract.OrdinaryCLIOverrides.Output.OmitRawResources)
+	assert.False(t, *contract.OrdinaryCLIOverrides.Output.OmitRawResources)
 }
 
 func TestPostureReportGojayUnmarshal_NoEncryptionMetadata(

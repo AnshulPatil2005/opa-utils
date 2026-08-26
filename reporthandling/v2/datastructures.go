@@ -130,6 +130,139 @@ type ScanMetadata struct {
 	HostScanner         bool           `json:"hostScanner,omitempty"`
 	Submit              bool           `json:"submit,omitempty"`
 	VerboseMode         bool           `json:"verboseMode,omitempty"`
+	// ScanContract captures the selected repository scan contract and the
+	// resolved scan inputs it influenced. It is absent for scans that did not
+	// use a repository scan contract.
+	ScanContract *ScanContractMetadata `json:"scanContract,omitempty"`
+}
+
+// ScanContractMetadata is the provenance envelope for a selected repository
+// scan contract. It deliberately records only identifiers, normalized scan
+// inputs, and digests. It must never contain runner credentials, file contents,
+// or absolute host paths.
+type ScanContractMetadata struct {
+	APIVersion              string                         `json:"apiVersion,omitempty"`
+	Name                    string                         `json:"name,omitempty"`
+	Contract                string                         `json:"contract,omitempty"`
+	MinimumKubescapeVersion string                         `json:"minimumKubescapeVersion,omitempty"`
+	DigestSchema            string                         `json:"digestSchema,omitempty"`
+	ContractDigest          string                         `json:"contractDigest,omitempty"`
+	EffectiveRunDigest      string                         `json:"effectiveRunDigest,omitempty"`
+	Source                  string                         `json:"source,omitempty"`
+	AllowedSections         []string                       `json:"allowedSections,omitempty"`
+	DeniedSections          []string                       `json:"deniedSections,omitempty"`
+	Effective               *ScanContractEffectiveSettings `json:"effective,omitempty"`
+	RunnerInputs            []ScanContractRunnerInput      `json:"runnerInputs,omitempty"`
+	GateResolution          *ScanContractGateResolution    `json:"gateResolution,omitempty"`
+	OrdinaryCLIOverrides    *ScanContractCLIOverrides      `json:"ordinaryCliOverrides,omitempty"`
+}
+
+// ScanContractRunnerInput identifies a runner-owned file that affected a scan.
+// Source is repository-relative when the input belongs to the repository, or
+// the literal "external" when revealing a host path would be unsafe.
+type ScanContractRunnerInput struct {
+	Role   string `json:"role,omitempty"`
+	Source string `json:"source,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// ScanContractEffectiveSettings contains the post-resolution contract values
+// that were provided to the scan. A nil section means that it did not
+// participate in the resolved contract.
+type ScanContractEffectiveSettings struct {
+	Policy     *ScanContractPolicy     `json:"policy,omitempty"`
+	Scope      *ScanContractScope      `json:"scope,omitempty"`
+	Evaluation *ScanContractEvaluation `json:"evaluation,omitempty"`
+	Failure    *ScanContractFailure    `json:"failure,omitempty"`
+	Output     *ScanContractOutput     `json:"output,omitempty"`
+}
+
+type ScanContractPolicy struct {
+	Frameworks      []string `json:"frameworks,omitempty"`
+	Controls        []string `json:"controls,omitempty"`
+	ControlsVersion string   `json:"controlsVersion,omitempty"`
+}
+
+type ScanContractScope struct {
+	IncludeNamespaces []string `json:"includeNamespaces,omitempty"`
+	ExcludeNamespaces []string `json:"excludeNamespaces,omitempty"`
+}
+
+type ScanContractEvaluation struct {
+	ScanTimeout    string `json:"scanTimeout,omitempty"`
+	ControlTimeout string `json:"controlTimeout,omitempty"`
+}
+
+// Pointer fields preserve the distinction between omitted gates and explicit
+// zero or false values.
+type ScanContractFailure struct {
+	SeverityAtLeast     *string  `json:"severityAtLeast,omitempty"`
+	ComplianceBelow     *float64 `json:"complianceBelow,omitempty"`
+	CoverageBelow       *float64 `json:"coverageBelow,omitempty"`
+	DegradedPolicyInput *bool    `json:"degradedPolicyInput,omitempty"`
+}
+
+type ScanContractOutput struct {
+	Formats          []string `json:"formats,omitempty"`
+	OmitRawResources *bool    `json:"omitRawResources,omitempty"`
+}
+
+// ScanContractGateResolution records the contract value, the trusted runner
+// floor, and the resulting effective value for each monotonic gate.
+type ScanContractGateResolution struct {
+	SeverityAtLeast     ScanContractStringGateResolution `json:"severityAtLeast,omitempty"`
+	ComplianceBelow     ScanContractNumberGateResolution `json:"complianceBelow,omitempty"`
+	CoverageBelow       ScanContractNumberGateResolution `json:"coverageBelow,omitempty"`
+	DegradedPolicyInput ScanContractBoolGateResolution   `json:"degradedPolicyInput,omitempty"`
+}
+
+type ScanContractStringGateResolution struct {
+	Contract    *string `json:"contract,omitempty"`
+	RunnerFloor *string `json:"runnerFloor,omitempty"`
+	Effective   *string `json:"effective,omitempty"`
+}
+
+type ScanContractNumberGateResolution struct {
+	Contract    *float64 `json:"contract,omitempty"`
+	RunnerFloor *float64 `json:"runnerFloor,omitempty"`
+	Effective   *float64 `json:"effective,omitempty"`
+}
+
+type ScanContractBoolGateResolution struct {
+	Contract    *bool `json:"contract,omitempty"`
+	RunnerFloor *bool `json:"runnerFloor,omitempty"`
+	Effective   *bool `json:"effective,omitempty"`
+}
+
+// ScanContractCLIOverrides preserves explicit runner-owned ordinary settings.
+// Pointer fields retain an explicit empty list or false value separately from
+// an omitted flag.
+type ScanContractCLIOverrides struct {
+	Policy     *ScanContractPolicyOverrides     `json:"policy,omitempty"`
+	Scope      *ScanContractScopeOverrides      `json:"scope,omitempty"`
+	Evaluation *ScanContractEvaluationOverrides `json:"evaluation,omitempty"`
+	Output     *ScanContractOutputOverrides     `json:"output,omitempty"`
+}
+
+type ScanContractPolicyOverrides struct {
+	Frameworks      *[]string `json:"frameworks,omitempty"`
+	Controls        *[]string `json:"controls,omitempty"`
+	ControlsVersion *string   `json:"controlsVersion,omitempty"`
+}
+
+type ScanContractScopeOverrides struct {
+	IncludeNamespaces *[]string `json:"includeNamespaces,omitempty"`
+	ExcludeNamespaces *[]string `json:"excludeNamespaces,omitempty"`
+}
+
+type ScanContractEvaluationOverrides struct {
+	ScanTimeout    *string `json:"scanTimeout,omitempty"`
+	ControlTimeout *string `json:"controlTimeout,omitempty"`
+}
+
+type ScanContractOutputOverrides struct {
+	Formats          *[]string `json:"formats,omitempty"`
+	OmitRawResources *bool     `json:"omitRawResources,omitempty"`
 }
 
 // Moved to apis/cloudmetadata.go
