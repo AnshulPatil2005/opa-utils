@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -35,6 +36,15 @@ func (c *comparator) compareNamespace(workload workloadinterface.IMetadata, name
 
 func (c *comparator) compareKind(workload workloadinterface.IMetadata, kind string) bool {
 	return c.regexCompare(kind, workload.GetKind())
+}
+
+// compareApiGroup matches against the resource's API group, taken from the group half of
+// its apiVersion. A core-group resource reports an empty group, so it is matched only by a
+// designator whose pattern accepts the empty string.
+func (c *comparator) compareApiGroup(workload workloadinterface.IMetadata, apiGroup string) bool {
+	group, _ := k8sinterface.SplitApiVersion(workload.GetApiVersion())
+
+	return c.regexCompare(apiGroup, group)
 }
 
 func (c *comparator) compareName(workload workloadinterface.IMetadata, name string) bool {

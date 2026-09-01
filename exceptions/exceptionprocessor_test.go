@@ -2014,3 +2014,83 @@ func TestSetRuleResponsExceptions_EmptyResourcesMatchesEverywhere(t *testing.T) 
 	require.NotNil(t, results[0].Exception, "a scope-less exception must still be attached via SetRuleResponsExceptions")
 	assert.Equal(t, "scope-less", results[0].Exception.GetName())
 }
+
+// TestMetadataHasException_ApiGroup covers a SecurityException scoped by apiGroup.
+//
+// armoapi-go's DigestAttributesDesignator has no case for apiGroup, so it arrives in the
+// labels map. Comparing it as a Kubernetes label can only fail, since apiGroup is a schema
+// field and no resource carries a label by that name, which left every designator using it
+// unmatchable. Matching it explicitly has to both restore the match and keep apiGroup
+// constraining, rather than dropping it and widening the exception to every group.
+func TestMetadataHasException_ApiGroup(t *testing.T) {
+	p := NewProcessor()
+
+	deployment := workloadinterface.NewWorkloadObj(deploymentObject("apps/v1", map[string]string{"app": "test-app"}))
+	pod := workloadinterface.NewWorkloadObj(podObject([]string{"app"}, nil))
+
+	tests := []struct {
+		name       string
+		workload   workloadinterface.IMetadata
+		attributes map[string]string
+		expected   bool
+	}{
+		{
+			name:       "apiGroup alone matches",
+			workload:   deployment,
+			attributes: map[string]string{identifiers.AttributeApiGroup: "apps"},
+			expected:   true,
+		},
+		{
+			name:     "apiGroup with kind matches",
+			workload: deployment,
+			attributes: map[string]string{
+				identifiers.AttributeApiGroup: "apps",
+				identifiers.AttributeKind:     "Deployment",
+			},
+			expected: true,
+		},
+		{
+			name:     "a different apiGroup still constrains a matching kind",
+			workload: deployment,
+			attributes: map[string]string{
+				identifiers.AttributeApiGroup: "batch",
+				identifiers.AttributeKind:     "Deployment",
+			},
+			expected: false,
+		},
+		{
+			name:       "named group does not match a core group resource",
+			workload:   pod,
+			attributes: map[string]string{identifiers.AttributeApiGroup: "apps"},
+			expected:   false,
+		},
+		{
+			name:     "apiGroup alongside a real label that matches",
+			workload: deployment,
+			attributes: map[string]string{
+				identifiers.AttributeApiGroup: "apps",
+				"app":                         "test-app",
+			},
+			expected: true,
+		},
+		{
+			name:     "apiGroup alongside a real label that does not match",
+			workload: deployment,
+			attributes: map[string]string{
+				identifiers.AttributeApiGroup: "apps",
+				"app":                         "other-app",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			designator := &identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     tt.attributes,
+			}
+			assert.Equal(t, tt.expected, p.metadataHasException(tt.workload, designator.DigestPortalDesignator(), nil, nil))
+		})
+	}
+}
